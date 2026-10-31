@@ -1312,6 +1312,37 @@ func TestCustomTaintsAndTolerations_Configuration(t *testing.T) {
 	assert.Equal(t, corev1.TaintEffectNoExecute, sts.Spec.Template.Spec.Tolerations[1].Effect)
 }
 
+func TestTopologySpreadConstraints_AreRemovedFromExistingStatefulSet(t *testing.T) {
+	ctx := context.Background()
+	mdb := newTestReplicaSet()
+	constraint := func(topologyKey string) corev1.TopologySpreadConstraint {
+		return corev1.TopologySpreadConstraint{MaxSkew: 1, TopologyKey: topologyKey, WhenUnsatisfiable: corev1.DoNotSchedule}
+	}
+	mdb.Spec.StatefulSetConfiguration.SpecWrapper.Spec.Template.Spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+		constraint("kubernetes.io/hostname"),
+		constraint("topology.kubernetes.io/zone"),
+	}
+
+	mgr := client.NewManager(ctx, &mdb)
+	r := NewReconciler(mgr, "fake-mongodbRepoUrl", "fake-mongodbImage", "ubi8", AgentImage, "fake-versionUpgradeHookImage", "fake-readinessProbeImage")
+	require.NoError(t, r.createOrUpdateStatefulSet(ctx, mdb, false))
+
+	mdb.Spec.StatefulSetConfiguration.SpecWrapper.Spec.Template.Spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+		constraint("topology.kubernetes.io/zone"),
+	}
+	require.NoError(t, r.createOrUpdateStatefulSet(ctx, mdb, false))
+
+	sts := appsv1.StatefulSet{}
+	require.NoError(t, mgr.GetClient().Get(ctx, mdb.NamespacedName(), &sts))
+	assert.Equal(t, []corev1.TopologySpreadConstraint{constraint("topology.kubernetes.io/zone")}, sts.Spec.Template.Spec.TopologySpreadConstraints)
+
+	mdb.Spec.StatefulSetConfiguration.SpecWrapper.Spec.Template.Spec.TopologySpreadConstraints = nil
+	require.NoError(t, r.createOrUpdateStatefulSet(ctx, mdb, false))
+
+	require.NoError(t, mgr.GetClient().Get(ctx, mdb.NamespacedName(), &sts))
+	assert.Empty(t, sts.Spec.Template.Spec.TopologySpreadConstraints)
+}
+
 func TestCustomDataDir_Configuration(t *testing.T) {
 	ctx := context.Background()
 	sts, c := performReconciliationAndGetStatefulSet(ctx, t, "specify_data_dir.yaml")

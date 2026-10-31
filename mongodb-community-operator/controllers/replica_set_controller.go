@@ -508,6 +508,9 @@ func (r *ReplicaSetReconciler) createOrUpdateStatefulSet(ctx context.Context, md
 	if err != nil {
 		return fmt.Errorf("error getting StatefulSet: %s", err)
 	}
+	// The resource spec is the only source of topology spread constraints. Merging it into the existing
+	// StatefulSet would keep constraints that were removed from the resource.
+	set.Spec.Template.Spec.TopologySpreadConstraints = nil
 
 	mongodbImage := getMongoDBImage(r.mongodbRepoUrl, r.mongodbImage, r.mongodbImageType, mdb.GetMongoDBVersion())
 	buildStatefulSetModificationFunction(mdb, mongodbImage, r.agentImage, r.versionUpgradeHookImage, r.readinessProbeImage)(&set)
